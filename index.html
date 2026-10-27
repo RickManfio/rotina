@@ -1,0 +1,1514 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<!--
+  Rotina: organizador pessoal de rotina (Etapa 1, app local)
+
+  O que tem aqui: cronograma de 24 horas, timer de foco (Pomodoro) e lembretes.
+  Tudo fica salvo no próprio aparelho (localStorage). Nada é enviado para a internet.
+
+  Como o arquivo está organizado:
+    <head>   etiquetas do app, regra de segurança, ícone e estilos (CSS)
+    <body>   cabeçalho, as três seções e a barra de abas do celular
+    <script> o comportamento, dividido em seções numeradas (1 a 6)
+-->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- Segurança: o app só carrega arquivos do próprio endereço e não se conecta a outros servidores. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; worker-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<title>Rotina</title>
+<meta name="description" content="Cronograma de 24 horas, timer de foco e lembretes.">
+<!-- "Adicionar à Tela de Início" no iPhone: abre em tela cheia, como um app. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Rotina">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="format-detection" content="telephone=no">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<!-- Ícone da Tela de Início: gerado por scripts/gerar-icone.js (não edite à mão). -->
+<link rel="apple-touch-icon" href="icone-180.png">
+<link rel="manifest" href="manifest.webmanifest">
+<!-- Liga a cópia para usar sem internet (só existe na versão publicada) -->
+<meta name="rotina-offline" content="sw.js">
+<style>
+/* ===== Cores e medidas (tema claro) ===== */
+:root {
+  color-scheme: light dark;
+  --bg: #f2f2f7;
+  --card: #ffffff;
+  --text: #1d1d1f;
+  --text-2: #6e6e73;
+  --text-3: #8e8e93;
+  --separator: rgba(60, 60, 67, 0.16);
+  --fill: rgba(118, 118, 128, 0.12);
+  --fill-strong: rgba(118, 118, 128, 0.2);
+  --accent: #0071e3;
+  --accent-fill: #0071e3;
+  --accent-soft: rgba(0, 113, 227, 0.1);
+  --on-accent: #ffffff;
+  --success: #248a3d;
+  --danger: #d70015;
+  --warning-bg: #fff1db;
+  --toast-bg: #1d1d1f;
+  --seg-on: #ffffff;
+  --seg-on-text: #0071e3;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 16px rgba(0, 0, 0, 0.06);
+  --radius: 16px;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif;
+  --font-rounded: ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --tabbar-h: 56px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+}
+
+/* ===== Tema escuro: entra sozinho com o modo escuro do aparelho ===== */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #000000;
+    --card: #1c1c1e;
+    --text: #f5f5f7;
+    --text-2: #98989d;
+    --text-3: #8e8e93;
+    --separator: rgba(84, 84, 88, 0.6);
+    --fill: rgba(118, 118, 128, 0.24);
+    --fill-strong: rgba(118, 118, 128, 0.36);
+    --accent: #0a84ff;
+    --accent-fill: #0071e3;
+    --accent-soft: rgba(10, 132, 255, 0.18);
+    --success: #30d158;
+    --danger: #ff453a;
+    --warning-bg: #3d2b0c;
+    --toast-bg: #3a3a3c;
+    --seg-on: #636366;
+    --seg-on-text: #ffffff;
+    --shadow: none;
+  }
+}
+
+/* ===== Base ===== */
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 17px/1.35 var(--font);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+button, input, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; touch-action: manipulation; }
+button:disabled { cursor: default; opacity: 0.35; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+[hidden] { display: none !important; }
+.sr-only {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* ===== Estrutura ===== */
+.app {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: calc(var(--safe-top) + 12px) calc(var(--safe-right) + 16px)
+           calc(var(--safe-bottom) + var(--tabbar-h) + 24px) calc(var(--safe-left) + 16px);
+}
+.app-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; padding: 8px 4px 12px; }
+.eyebrow { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-2); }
+.app-header h1 { margin: 2px 0 0; font-size: 34px; line-height: 1.1; font-weight: 700; letter-spacing: -0.02em; }
+.clock { margin: 0 0 4px; font: 600 22px/1 var(--font-rounded); font-variant-numeric: tabular-nums; color: var(--text-2); }
+.panel { min-width: 0; padding: 0 16px 16px; border-radius: var(--radius); background: var(--card); box-shadow: var(--shadow); }
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 56px; }
+.panel-head h2 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
+
+/* ===== Barra de abas (só em telas estreitas, como o iPhone) ===== */
+.tabbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+  display: flex; justify-content: space-around;
+  padding: 4px calc(var(--safe-right) + 8px) calc(var(--safe-bottom) + 4px) calc(var(--safe-left) + 8px);
+  background: var(--card);
+  background: color-mix(in srgb, var(--card) 82%, transparent);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  border-top: 0.5px solid var(--separator);
+}
+.tab {
+  flex: 1; max-width: 160px; min-height: 48px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  border: 0; border-radius: 10px; background: none;
+  color: var(--text-2); font-size: 11px; font-weight: 600;
+}
+.tab svg { width: 26px; height: 26px; }
+.tab[aria-current="page"] { color: var(--accent); }
+
+/* ===== Celular: uma seção por vez ===== */
+@media (max-width: 899px) {
+  .panel { display: none; }
+  body[data-tab="schedule"] #panel-schedule,
+  body[data-tab="focus"] #panel-focus,
+  body[data-tab="reminders"] #panel-reminders { display: block; }
+  .panel-head {
+    position: sticky; top: 0; z-index: 2;
+    margin: 0 -16px; padding: 0 16px;
+    border-radius: var(--radius) var(--radius) 0 0;
+    background: var(--card);
+  }
+}
+
+/* ===== Mac e telas largas: tudo lado a lado ===== */
+@media (min-width: 900px) {
+  .app { padding: 28px 32px 32px; }
+  .tabbar { display: none; }
+  .panels {
+    display: grid; gap: 20px; align-items: start;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
+  }
+  #panel-schedule { grid-row: 1 / span 2; }
+  #panel-schedule .hours { max-height: calc(100vh - 250px); min-height: 320px; overflow-y: auto; overscroll-behavior: contain; }
+  /* Com o quadro "Hoje no calendário" aberto, a lista encolhe para tudo caber na janela */
+  #panel-schedule:has(#today-notes:not([hidden])) .hours { max-height: calc(100vh - 345px); }
+  #today-notes-list { max-height: 72px; overflow-y: auto; }
+}
+@media (min-width: 1200px) {
+  .panels { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto; }
+  #panel-schedule { grid-row: auto; }
+}
+
+/* ===== Seções: as Tarefas 2 a 4 acrescentam o CSS delas abaixo ===== */
+
+/* ===== Botões simples (texto e ícone) ===== */
+.btn-text { min-height: 44px; padding: 0 12px; border: 0; border-radius: 10px; background: none; color: var(--accent); font-size: 17px; font-weight: 600; }
+.btn-icon { flex: none; width: 44px; height: 44px; display: grid; place-items: center; border: 0; border-radius: 10px; background: none; color: var(--text-2); }
+.btn-icon svg { width: 20px; height: 20px; }
+@media (hover: hover) {
+  .btn-text:hover { background: var(--accent-soft); }
+  .btn-icon:hover { background: var(--fill); }
+}
+
+/* ===== Aviso fixo (problemas ao salvar): fica sempre no topo da tela, mesmo rolando ===== */
+.banner {
+  position: fixed; z-index: 30;
+  top: calc(var(--safe-top) + 8px); left: calc(var(--safe-left) + 12px); right: calc(var(--safe-right) + 12px);
+  max-width: 640px; margin: 0 auto;
+  display: flex; align-items: center; gap: 8px; padding: 4px 4px 4px 14px;
+  border-radius: 12px; background: var(--warning-bg); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15); font-size: 15px;
+}
+.banner p { flex: 1; margin: 0; padding: 8px 0; }
+
+/* ===== Cronograma ===== */
+.hours { list-style: none; margin: 0 -8px; padding: 0; }
+.hour { position: relative; display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 0 8px; border-radius: 12px; }
+.hour + .hour::before { content: ""; position: absolute; top: 0; left: 72px; right: 8px; border-top: 0.5px solid var(--separator); }
+.hour.is-now::before, .hour.is-now + .hour::before { display: none; }
+.hour-label { flex: none; width: 52px; font: 600 15px/1 var(--font-rounded); font-variant-numeric: tabular-nums; color: var(--text-2); }
+.hour.is-past .hour-label { color: var(--text-3); }
+.hour-input { position: relative; z-index: 1; flex: 1; min-width: 0; height: 44px; padding: 0 10px; border: 0; border-radius: 10px; background: transparent; font-size: 17px; }
+.hour-input::placeholder { color: var(--text-3); }
+.hour-input:focus { outline: none; background: var(--fill); }
+.now-badge { display: none; flex: none; padding: 3px 8px; border-radius: 999px; background: var(--accent-fill); color: var(--on-accent); font-size: 12px; font-weight: 700; }
+/* Barrinha embaixo da hora atual: cresce conforme os minutos passam (fica abaixo do texto para não parecer riscado). */
+.now-line { display: none; position: absolute; left: 8px; bottom: 3px; height: 3px; width: max(3px, calc((100% - 16px) * var(--now-frac, 0))); border-radius: 2px; background: var(--accent); pointer-events: none; }
+.hour.is-now { background: var(--accent-soft); }
+.hour.is-now .hour-label { color: var(--accent); }
+.hour.is-now .now-badge { display: inline-block; }
+.hour.is-now .now-line { display: block; }
+
+/* ===== Botões grandes ===== */
+.btn { min-height: 50px; padding: 0 20px; border: 0; border-radius: 14px; font-size: 17px; font-weight: 600; }
+.btn-primary { background: var(--accent-fill); color: var(--on-accent); }
+.btn-secondary { background: var(--fill); color: var(--text); }
+.btn-round { width: 44px; height: 44px; display: grid; place-items: center; border: 0; border-radius: 50%; background: var(--fill); font-size: 24px; line-height: 1; }
+.btn:not(:disabled):active, .btn-round:not(:disabled):active { transform: scale(0.97); }
+@media (hover: hover) {
+  .btn-primary:not(:disabled):hover { filter: brightness(1.1); }
+  .btn-secondary:not(:disabled):hover, .btn-round:not(:disabled):hover { background: var(--fill-strong); }
+}
+
+/* ===== Timer de foco ===== */
+.timer { display: flex; flex-direction: column; align-items: center; gap: 20px; padding: 4px 0 8px; }
+.ring-wrap { position: relative; width: min(72vw, 260px); aspect-ratio: 1; }
+.ring { display: block; width: 100%; height: 100%; transform: rotate(-90deg); }
+.ring circle { fill: none; stroke-width: 8; }
+.ring-track { stroke: var(--fill); }
+.ring-progress { stroke: var(--accent); stroke-linecap: round; stroke-dasharray: 339.29; transition: stroke-dashoffset 0.3s linear, stroke 0.3s; }
+.timer-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.timer-display { margin: 0; font: 300 64px/1 var(--font-rounded); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.timer-status { margin: 10px 0 0; font-size: 15px; color: var(--text-2); }
+.duration { display: flex; align-items: center; gap: 16px; }
+.duration-label { min-width: 72px; text-align: center; font-weight: 600; font-variant-numeric: tabular-nums; }
+.timer-controls { display: flex; gap: 12px; width: 100%; max-width: 360px; }
+.timer-controls .btn { flex: 1; }
+.timer.is-finished .ring-progress { stroke: var(--success); }
+.timer.is-finished .ring-wrap { animation: pulse 1.2s ease-in-out 3; }
+@keyframes pulse { 50% { transform: scale(1.04); } }
+
+/* ===== Aviso flutuante ("Tempo esgotado", "Desfazer") ===== */
+.toast {
+  position: fixed; z-index: 20; left: 50%; bottom: calc(var(--safe-bottom) + var(--tabbar-h) + 16px);
+  transform: translateX(-50%);
+  display: flex; align-items: center; gap: 4px;
+  width: max-content; max-width: calc(100% - 32px);
+  padding: 4px 4px 4px 16px; border-radius: 14px;
+  background: var(--toast-bg); color: #fff; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2); font-size: 15px;
+}
+.toast-text { padding: 12px 12px 12px 0; }
+.toast-action { color: #64d2ff; }
+@media (min-width: 900px) { .toast { bottom: 24px; } }
+
+/* ===== Lembretes ===== */
+.count { font-size: 15px; color: var(--text-2); }
+.add-form { display: flex; gap: 8px; margin-bottom: 4px; }
+.add-form input { flex: 1; min-width: 0; height: 50px; padding: 0 14px; border: 0; border-radius: 12px; background: var(--fill); font-size: 17px; }
+.add-form input::placeholder { color: var(--text-3); }
+.add-form input:focus { outline: 2px solid var(--accent); outline-offset: 0; }
+.reminder-list { list-style: none; margin: 0; padding: 0; }
+.reminder { display: flex; align-items: center; gap: 4px; border-bottom: 0.5px solid var(--separator); }
+.reminder:last-child { border-bottom: 0; }
+.check { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 6px 0; cursor: pointer; }
+.check-input { position: absolute; width: 1px; height: 1px; margin: 0; opacity: 0; }
+.check-box { flex: none; width: 24px; height: 24px; display: grid; place-items: center; border: 2px solid var(--text-3); border-radius: 50%; }
+.check-input:checked + .check-box { border-color: var(--accent-fill); background: var(--accent-fill); }
+.check-input:checked + .check-box::after { content: ""; width: 6px; height: 11px; margin-top: -2px; border: solid var(--on-accent); border-width: 0 2.5px 2.5px 0; transform: rotate(45deg); }
+.check-input:focus-visible + .check-box { outline: 3px solid var(--accent); outline-offset: 2px; }
+.reminder-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.reminder.is-done .reminder-text { color: var(--text-2); text-decoration: line-through; }
+.reminder .delete:hover, .reminder .delete:focus-visible { color: var(--danger); }
+.empty { margin: 20px 0 8px; text-align: center; font-size: 15px; color: var(--text-2); }
+
+/* ===== Frase "Vale para todos os …" ===== */
+.day-hint { margin: 0 0 8px; font-size: 13px; color: var(--text-2); }
+
+/* ===== Seletor Agora · Semanal · Mensal ===== */
+.panel-head.has-views { flex-wrap: wrap; row-gap: 4px; padding-bottom: 8px; }
+.segmented { display: flex; flex: 1 1 100%; padding: 2px; border-radius: 11px; background: var(--fill); }
+.seg { flex: 1; min-height: 44px; padding: 0 10px; border: 0; border-radius: 9px; background: none; color: var(--text); font-size: 15px; font-weight: 600; }
+.seg[aria-pressed="true"] { background: var(--seg-on); color: var(--seg-on-text); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12); }
+
+/* ===== Visão Semanal: grade com os 7 dias ===== */
+.week-scroll {
+  overflow: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+  max-height: calc(100vh - 210px - var(--safe-bottom));
+  max-height: calc(100dvh - 210px - var(--safe-bottom));
+  border-radius: 10px;
+}
+.week-grid { width: 100%; min-width: 756px; table-layout: fixed; border-collapse: separate; border-spacing: 0; }
+.week-grid th, .week-grid td { padding: 0; border-bottom: 0.5px solid var(--separator); }
+.week-grid thead th { position: sticky; top: 0; z-index: 2; height: 40px; background: var(--card); font-size: 13px; font-weight: 700; color: var(--text-2); }
+.week-grid thead th.is-today { color: var(--accent); box-shadow: inset 0 -2px 0 var(--accent); }
+.week-grid .corner, .week-grid tbody th { width: 56px; }
+.week-grid .corner { left: 0; z-index: 3; }
+.week-grid tbody th { position: sticky; left: 0; z-index: 1; padding-left: 4px; background: var(--card); text-align: left; font: 600 13px/1 var(--font-rounded); font-variant-numeric: tabular-nums; color: var(--text-2); }
+.week-grid tr.is-now-row th { color: var(--accent); }
+.week-grid td.is-today { background: var(--accent-soft); }
+.week-grid td { height: 52px; vertical-align: top; }
+/* Exatamente 2 linhas de 20px + 6px em cima: a 3ª linha fica toda escondida, sem meia linha cortada */
+.week-cell {
+  display: block; width: 100%; height: 46px; padding: 6px 6px 0; margin: 0;
+  border: 0; border-radius: 0;
+  background: transparent; resize: none; overflow: hidden;
+  font: 16px/20px var(--font);
+}
+.week-grid td + td, .week-grid th + td { border-left: 0.5px solid var(--separator); }
+.week-cell::placeholder { color: var(--text-3); }
+.week-cell:focus { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--card); }
+
+@media (min-width: 900px) {
+  .segmented { flex: 0 1 280px; }
+  .week-scroll { max-height: calc(100vh - 230px); }
+  /* Na Semanal o cronograma fica mais largo; Foco e Lembretes vão para a direita, empilhados */
+  body[data-view="week"] .panels { grid-template-columns: minmax(0, 2.4fr) minmax(300px, 1fr); grid-template-rows: auto 1fr; }
+  body[data-view="week"] #panel-schedule { grid-row: 1 / span 2; }
+}
+/* Janelas médias no Mac: a grade ocupa a largura toda; Foco e Lembretes ficam embaixo, lado a lado */
+@media (min-width: 900px) and (max-width: 1199px) {
+  body[data-view="week"] .panels { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto; }
+  body[data-view="week"] #panel-schedule { grid-column: 1 / -1; grid-row: auto; }
+}
+
+/* ===== Visão Mensal: calendário com anotações ===== */
+.month-head { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; }
+.month-title { flex: 1; margin: 0; text-align: center; font-size: 17px; font-weight: 700; }
+.month-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px 0; margin-bottom: 12px; } /* sem espaço entre colunas: dias com 44 px mesmo no iPhone de 375 px */
+.month-dow { padding: 6px 0; text-align: center; font-size: 12px; font-weight: 700; color: var(--text-2); }
+.day { position: relative; min-height: 44px; border: 0; border-radius: 10px; background: none; color: var(--text); font: 600 16px/1 var(--font-rounded); font-variant-numeric: tabular-nums; }
+.day.is-today { color: var(--accent); }
+.day[aria-pressed="true"] { background: var(--accent-fill); color: var(--on-accent); }
+.day .dot { position: absolute; left: 50%; bottom: 5px; width: 5px; height: 5px; margin-left: -2.5px; border-radius: 50%; background: var(--accent); }
+.day[aria-pressed="true"] .dot { background: var(--on-accent); }
+@media (hover: hover) { .day:not([aria-pressed="true"]):hover { background: var(--fill); } }
+.notes-title { margin: 8px 0 4px; font-size: 17px; font-weight: 700; }
+.note-list { list-style: none; margin: 0; padding: 0; }
+.note { display: flex; align-items: center; gap: 8px; min-height: 48px; border-bottom: 0.5px solid var(--separator); }
+.note-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.note .delete:hover, .note .delete:focus-visible { color: var(--danger); }
+.day-notes .add-form { margin-top: 8px; }
+
+/* Anotações de hoje no topo do Agora */
+.today-notes { margin: 0 0 8px; padding: 10px 14px; border-radius: 12px; background: var(--accent-soft); }
+.today-notes-title { margin: 0 0 4px; font-size: 13px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; color: var(--accent); }
+.today-notes ul { margin: 0; padding-left: 18px; overflow-wrap: anywhere; }
+
+/* Aviso quando alguém tenta exibir o app dentro de outro site */
+.framed { margin: 24px; font-size: 17px; }
+
+/* Quem pede menos movimento nos ajustes do aparelho não vê animações. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
+</style>
+</head>
+<body data-tab="schedule" data-view="today">
+<div class="app">
+  <header class="app-header">
+    <div>
+      <p class="eyebrow" id="today-date">&nbsp;</p>
+      <h1>Rotina</h1>
+    </div>
+    <p class="clock" id="clock">--:--</p>
+  </header>
+
+  <div class="banner" id="banner" role="alert" hidden>
+    <p id="banner-text"></p>
+    <button type="button" class="btn-icon" id="banner-close" aria-label="Fechar aviso">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+  </div>
+
+  <main class="panels">
+    <section class="panel" id="panel-schedule" data-panel="schedule" aria-labelledby="title-schedule">
+      <div class="panel-head has-views">
+        <h2 id="title-schedule">Cronograma</h2>
+        <div class="segmented" role="group" aria-label="Visão do cronograma">
+          <button type="button" class="seg" id="btn-now" data-view="today" aria-pressed="true">Agora</button>
+          <button type="button" class="seg" data-view="week" aria-pressed="false">Semanal</button>
+          <button type="button" class="seg" data-view="month" aria-pressed="false">Mensal</button>
+        </div>
+      </div>
+      <div class="view" id="view-today">
+        <p class="day-hint" id="day-hint"></p>
+        <div class="today-notes" id="today-notes" hidden>
+          <p class="today-notes-title">Hoje no calendário</p>
+          <ul id="today-notes-list"></ul>
+        </div>
+        <ol class="hours" id="hours"></ol>
+      </div>
+      <div class="view" id="view-week" hidden>
+        <p class="day-hint">Cada coluna é o plano padrão daquele dia da semana.</p>
+        <div class="week-scroll" id="week-scroll">
+          <table class="week-grid" id="week-grid"></table>
+        </div>
+      </div>
+      <div class="view" id="view-month" hidden>
+        <div class="month-head">
+          <button type="button" class="btn-icon" id="month-prev" aria-label="Mês anterior">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+          </button>
+          <h3 class="month-title" id="month-title"></h3>
+          <button type="button" class="btn-icon" id="month-next" aria-label="Próximo mês">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>
+          </button>
+          <button type="button" class="btn-text" id="month-today">Hoje</button>
+        </div>
+        <div class="month-grid" id="month-grid"></div>
+        <section class="day-notes" aria-labelledby="notes-title">
+          <h3 class="notes-title" id="notes-title"></h3>
+          <ul class="note-list" id="note-list"></ul>
+          <p class="empty" id="notes-empty">Nenhuma anotação neste dia.</p>
+          <form class="add-form" id="note-form" autocomplete="off">
+            <label class="sr-only" for="note-input">Nova anotação</label>
+            <input id="note-input" type="text" maxlength="200" placeholder="Nova anotação" enterkeyhint="done">
+            <button type="submit" class="btn btn-primary">Adicionar</button>
+          </form>
+        </section>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-focus" data-panel="focus" aria-labelledby="title-focus">
+      <div class="panel-head">
+        <h2 id="title-focus">Foco</h2>
+      </div>
+      <div class="timer" id="timer">
+        <div class="ring-wrap">
+          <svg class="ring" viewBox="0 0 120 120" aria-hidden="true">
+            <circle class="ring-track" cx="60" cy="60" r="54"/>
+            <circle class="ring-progress" id="ring-progress" cx="60" cy="60" r="54"/>
+          </svg>
+          <div class="timer-center">
+            <p class="timer-display" id="timer-display" role="timer" aria-atomic="true">25:00</p>
+            <p class="timer-status" id="timer-status" aria-live="polite">Pronto para focar</p>
+          </div>
+        </div>
+        <div class="duration" role="group" aria-label="Duração do foco">
+          <button type="button" class="btn-round" id="btn-minus" aria-label="Diminuir 5 minutos">−</button>
+          <span class="duration-label" id="duration-label">25 min</span>
+          <button type="button" class="btn-round" id="btn-plus" aria-label="Aumentar 5 minutos">+</button>
+        </div>
+        <div class="timer-controls">
+          <button type="button" class="btn btn-secondary" id="btn-reset">Reiniciar</button>
+          <button type="button" class="btn btn-primary" id="btn-start">Iniciar</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-reminders" data-panel="reminders" aria-labelledby="title-reminders">
+      <div class="panel-head">
+        <h2 id="title-reminders">Lembretes</h2>
+        <span class="count" id="pending-count">Nada pendente</span>
+      </div>
+      <form class="add-form" id="reminder-form" autocomplete="off">
+        <label class="sr-only" for="reminder-input">Novo lembrete</label>
+        <input id="reminder-input" type="text" maxlength="200" placeholder="Novo lembrete" enterkeyhint="done">
+        <button type="submit" class="btn btn-primary">Adicionar</button>
+      </form>
+      <ul class="reminder-list" id="reminder-list"></ul>
+      <p class="empty" id="reminders-empty">Nenhum lembrete por aqui.</p>
+    </section>
+  </main>
+</div>
+
+<!-- Barra de abas: só aparece em telas estreitas (iPhone). -->
+<nav class="tabbar" aria-label="Seções">
+  <button type="button" class="tab" data-tab="schedule" aria-current="page">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="16" rx="3"/><path d="M3.5 9.5h17M8 2.5v4M16 2.5v4M8 13.5h3M8 17h6"/></svg>
+    <span>Cronograma</span>
+  </button>
+  <button type="button" class="tab" data-tab="focus">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13.5" r="7.5"/><path d="M12 9.5v4l2.5 2M9.5 2.5h5M18.5 6.5l1.5-1.5"/></svg>
+    <span>Foco</span>
+  </button>
+  <button type="button" class="tab" data-tab="reminders">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6.5l1.5 1.5L8.5 5M4 12.5l1.5 1.5 3-3M4 18.5l1.5 1.5 3-3M12 7h8M12 13h8M12 19h8"/></svg>
+    <span>Lembretes</span>
+  </button>
+</nav>
+
+<div class="toast" id="toast" role="status" hidden>
+  <span class="toast-text" id="toast-text"></span>
+  <button type="button" class="btn-text toast-action" id="toast-action" hidden></button>
+</div>
+<template id="icon-trash">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9.5 7V4.5h5V7M6.5 7l1 12.5a1.5 1.5 0 0 0 1.5 1.4h6a1.5 1.5 0 0 0 1.5-1.4L17.5 7M10 11v6M14 11v6"/></svg>
+</template>
+
+<script>
+'use strict';
+
+/* =========================================================
+   1. Utilidades
+   ========================================================= */
+/** Atalho para buscar um elemento da página. */
+const $ = (selector, root = document) => root.querySelector(selector);
+/** 7 → "07" */
+const pad2 = (n) => String(n).padStart(2, '0');
+/** Data no formato "aaaa-mm-dd", no horário local. */
+const dateKey = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+/** "sábado" → "Sábado" */
+const capitalize = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/* =========================================================
+   2. Avisos e armazenamento
+   Única parte do app que lê e grava dados. Na Etapa 2, a
+   sincronização com a nuvem vai se ligar aqui.
+   ========================================================= */
+const MESSAGES = {
+  saveFailed: 'Não foi possível salvar neste navegador (talvez seja uma janela privada). O que você mudar agora pode se perder ao fechar.',
+  corrupted: 'Alguns dados salvos estavam com problema e foram corrigidos. O restante continua aqui.',
+};
+
+/** Aviso fixo no topo da tela. */
+function showBanner(message) {
+  $('#banner-text').textContent = message;
+  $('#banner').hidden = false;
+}
+function hideBanner() {
+  $('#banner').hidden = true;
+}
+$('#banner-close').addEventListener('click', hideBanner);
+
+/* Aviso flutuante: aparece por alguns segundos (ex.: "Tempo esgotado", "Desfazer"). */
+let toastTimer = null;
+let toastAction = null;
+function showToast(message, { actionLabel = '', onAction = null, duration = 6000 } = {}) {
+  $('#toast-text').textContent = message;
+  const action = $('#toast-action');
+  action.textContent = actionLabel;
+  action.hidden = !actionLabel;
+  toastAction = onAction;
+  $('#toast').hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(hideToast, duration);
+}
+function hideToast() {
+  clearTimeout(toastTimer);
+  toastAction = null;
+  $('#toast').hidden = true;
+}
+$('#toast-action').addEventListener('click', () => {
+  const action = toastAction;
+  hideToast();
+  if (action) action();
+});
+
+const STORAGE_KEY = 'rotina:v2';
+const LEGACY_KEY = 'rotina:v1'; // primeira versão (um plano só): só é lida, nunca alterada, e serve de cópia de segurança
+const BACKUP_KEY = 'rotina:v2:backup-corrompido';
+const LIMITS = { hourText: 140, reminderText: 200, noteText: 200, minDuration: 5, maxDuration: 90, step: 5, defaultDuration: 25 };
+const FOCUS_STATUSES = ['idle', 'running', 'paused', 'finished'];
+// Datas das anotações: só "aaaa-mm-dd". Isso também barra chaves como "__proto__".
+const DATE_KEY = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+
+/** Confere se "aaaa-mm-dd" é uma data que existe (barra 30 de fevereiro, ano 0 etc.). */
+function isRealDate(key) {
+  if (!DATE_KEY.test(key)) return false;
+  const [y, m, d] = key.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  return date.getFullYear() === y && date.getMonth() === m - 1 && date.getDate() === d;
+}
+
+/** Um dia vazio: 24 horas sem texto. */
+const emptyDay = () => Array(24).fill('');
+
+/** Estado inicial: 7 dias vazios (0 = domingo … 6 = sábado), sem anotações nem lembretes, timer em 25 min. */
+function defaultState() {
+  return {
+    version: 2,
+    week: Array.from({ length: 7 }, emptyDay),
+    notes: {},
+    reminders: [],
+    focus: { durationMin: LIMITS.defaultDuration, status: 'idle', endsAt: null, remainingMs: LIMITS.defaultDuration * 60000 },
+  };
+}
+
+/** Confere as 24 horas de um dia. */
+function cleanDay(raw, problem) {
+  if (!Array.isArray(raw) || raw.length !== 24) { problem(); return emptyDay(); }
+  return raw.map((text) => {
+    if (typeof text !== 'string') { problem(); return ''; }
+    if (text.length > LIMITS.hourText) problem();
+    return text.slice(0, LIMITS.hourText);
+  });
+}
+
+/** Confere uma lista de itens com id, texto e data (os lembretes têm também "feito"). */
+function cleanItems(raw, maxText, withDone, problem) {
+  if (!Array.isArray(raw)) { problem(); return []; }
+  const seen = new Set();
+  const items = [];
+  for (const r of raw) {
+    const valid = r && typeof r === 'object'
+      && typeof r.id === 'string' && r.id.length > 0 && r.id.length <= 64 && !seen.has(r.id)
+      && typeof r.text === 'string' && r.text.trim() !== ''
+      && (!withDone || typeof r.done === 'boolean')
+      && Number.isFinite(r.createdAt);
+    if (!valid) { problem(); continue; }
+    seen.add(r.id);
+    if (r.text.length > maxText) problem();
+    const item = { id: r.id, text: r.text.slice(0, maxText), createdAt: r.createdAt };
+    if (withDone) item.done = r.done;
+    items.push(item);
+  }
+  return items;
+}
+
+/** Confere as anotações: só datas válidas, cada uma com sua lista. */
+function cleanNotes(raw, problem) {
+  const notes = {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) { problem(); return notes; }
+  for (const key of Object.keys(raw)) {
+    if (!isRealDate(key)) { problem(); continue; }
+    const items = cleanItems(raw[key], LIMITS.noteText, false, problem);
+    if (items.length) notes[key] = items;
+  }
+  return notes;
+}
+
+/** Confere o timer de foco. */
+function cleanFocus(f, problem) {
+  if (!f || typeof f !== 'object') { problem(); return defaultState().focus; }
+  const d = f.durationMin;
+  const validDuration = Number.isInteger(d) && d >= LIMITS.minDuration && d <= LIMITS.maxDuration && d % LIMITS.step === 0;
+  const durationMin = validDuration ? d : LIMITS.defaultDuration;
+  const fullMs = durationMin * 60000;
+  let status = FOCUS_STATUSES.includes(f.status) ? f.status : 'idle';
+  const endsAt = Number.isFinite(f.endsAt) ? f.endsAt : null;
+  if (!validDuration || status !== f.status) problem();
+  if (status === 'running' && endsAt === null) { status = 'idle'; problem(); }
+  if (status === 'paused' && !(Number.isFinite(f.remainingMs) && f.remainingMs > 0 && f.remainingMs <= fullMs)) { status = 'idle'; problem(); }
+  const remainingMs = { idle: fullMs, running: fullMs, paused: f.remainingMs, finished: 0 }[status];
+  return { durationMin, status, endsAt: status === 'running' ? endsAt : null, remainingMs };
+}
+
+/**
+ * Confere dados vindos do armazenamento (que podem estar velhos, corrompidos
+ * ou editados à mão) e devolve uma versão segura, sempre no formato 2.
+ * Retorna { state, changed }: changed = true se algo precisou ser corrigido.
+ */
+function sanitizeState(raw) {
+  const clean = defaultState();
+  if (!raw || typeof raw !== 'object' || (raw.version !== 1 && raw.version !== 2)) return { state: clean, changed: true };
+  let changed = false;
+  const problem = () => { changed = true; };
+
+  if (raw.version === 1) {
+    // Primeira versão: um plano só, que vira o plano dos 7 dias
+    const day = cleanDay(raw.schedule, problem);
+    clean.week = Array.from({ length: 7 }, () => day.slice());
+  } else {
+    if (Array.isArray(raw.week) && raw.week.length === 7) clean.week = raw.week.map((day) => cleanDay(day, problem));
+    else problem();
+    clean.notes = cleanNotes(raw.notes, problem);
+  }
+  clean.reminders = cleanItems(raw.reminders, LIMITS.reminderText, true, problem);
+  clean.focus = cleanFocus(raw.focus, problem);
+  return { state: clean, changed };
+}
+
+/**
+ * Lê os dados salvos. Retorna { state, problem, migrated }:
+ * problem = null ou 'corrupted'; migrated = true se os dados vieram da primeira versão.
+ */
+function loadState() {
+  let text = null;
+  let legacy = null;
+  try {
+    text = localStorage.getItem(STORAGE_KEY);
+    if (text === null) legacy = localStorage.getItem(LEGACY_KEY);
+  } catch { /* sem acesso: probeStorage() avisa */ }
+  if (text === null && legacy === null) return { state: defaultState(), problem: null, migrated: false };
+  const source = text !== null ? text : legacy;
+  let parsed;
+  try { parsed = JSON.parse(source); } catch { parsed = undefined; }
+  const { state: clean, changed } = sanitizeState(parsed);
+  if (changed && text !== null) {
+    // Guarda uma cópia do que estava lá antes de consertar, para nada se perder de vez.
+    try { localStorage.setItem(BACKUP_KEY, text); } catch { /* sem espaço: segue sem a cópia */ }
+  }
+  return { state: clean, problem: changed ? 'corrupted' : null, migrated: text === null };
+}
+
+/** Confere se o navegador deixa gravar (algumas janelas privadas não deixam). */
+function probeStorage() {
+  try {
+    localStorage.setItem('rotina:teste', '1');
+    localStorage.removeItem('rotina:teste');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+let state = defaultState();
+let saveFailed = false;
+
+/** Grava tudo. Se o navegador recusar, avisa (uma vez) sem travar o app. */
+function saveState() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    if (saveFailed) { saveFailed = false; hideBanner(); }
+  } catch {
+    if (!saveFailed) { saveFailed = true; showBanner(MESSAGES.saveFailed); }
+  }
+}
+
+/* =========================================================
+   3. Cronograma (rotina fixa de 24 horas)
+   ========================================================= */
+const hoursList = $('#hours');
+const dateFormat = new Intl.DateTimeFormat('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
+const DAY_EVERY = [
+  'Vale para todos os domingos', 'Vale para todas as segundas-feiras', 'Vale para todas as terças-feiras',
+  'Vale para todas as quartas-feiras', 'Vale para todas as quintas-feiras', 'Vale para todas as sextas-feiras',
+  'Vale para todos os sábados',
+];
+let scheduleDay = new Date().getDay(); // dia da semana que o Agora está mostrando
+let currentDateKey = dateKey(new Date()); // para perceber a virada do dia
+
+/** Cria as 24 linhas (00:00 a 23:00). Roda uma vez, ao abrir. */
+function buildSchedule() {
+  const rows = document.createDocumentFragment();
+  for (let h = 0; h < 24; h++) {
+    const row = document.createElement('li');
+    row.className = 'hour';
+    row.dataset.hour = String(h);
+
+    const label = document.createElement('label');
+    label.className = 'hour-label';
+    label.htmlFor = `h-${h}`;
+    label.textContent = `${pad2(h)}:00`;
+
+    const input = document.createElement('input');
+    input.className = 'hour-input';
+    input.id = `h-${h}`;
+    input.type = 'text';
+    input.maxLength = LIMITS.hourText;
+    input.placeholder = 'Livre';
+    input.autocomplete = 'off';
+    input.setAttribute('enterkeyhint', h < 23 ? 'next' : 'done');
+
+    const badge = document.createElement('span');
+    badge.className = 'now-badge';
+    badge.textContent = 'Agora';
+
+    const line = document.createElement('span');
+    line.className = 'now-line';
+    line.setAttribute('aria-hidden', 'true');
+
+    row.append(label, input, badge, line);
+    rows.append(row);
+  }
+  hoursList.append(rows);
+}
+
+/** Coloca nos campos o plano do dia de hoje, sem mexer no campo que está sendo digitado. */
+function renderSchedule() {
+  const day = state.week[scheduleDay];
+  for (let h = 0; h < 24; h++) {
+    const input = $(`#h-${h}`);
+    if (input !== document.activeElement) input.value = day[h];
+  }
+  $('#day-hint').textContent = DAY_EVERY[scheduleDay];
+}
+
+// Cada letra digitada já é salva.
+hoursList.addEventListener('input', (e) => {
+  const input = e.target.closest('.hour-input');
+  if (!input) return;
+  if (input.value.length > LIMITS.hourText) input.value = input.value.slice(0, LIMITS.hourText);
+  state.week[scheduleDay][Number(input.closest('.hour').dataset.hour)] = input.value;
+  saveState();
+});
+
+// Enter vai para a hora seguinte; Esc sai do campo.
+hoursList.addEventListener('keydown', (e) => {
+  const input = e.target.closest('.hour-input');
+  if (!input || e.isComposing) return;
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    const next = $(`#h-${Number(input.closest('.hour').dataset.hour) + 1}`);
+    if (next) next.focus();
+    else input.blur();
+  } else if (e.key === 'Escape') {
+    input.blur();
+  }
+});
+
+/** Atualiza a data, o relógio e o destaque da hora atual. */
+function updateNow() {
+  const now = new Date();
+  const key = dateKey(now);
+  if (key !== currentDateKey) {
+    const previousKey = currentDateKey;
+    currentDateKey = key;
+    onNewDay(previousKey);
+  }
+  const hour = now.getHours();
+  const date = dateFormat.format(now);
+  $('#today-date').textContent = capitalize(date);
+  $('#clock').textContent = `${pad2(hour)}:${pad2(now.getMinutes())}`;
+  for (const row of hoursList.children) {
+    const h = Number(row.dataset.hour);
+    row.classList.toggle('is-now', h === hour);
+    row.classList.toggle('is-past', h < hour);
+    if (h === hour) row.setAttribute('aria-current', 'time');
+    else row.removeAttribute('aria-current');
+  }
+  highlightWeek(now);
+  // Barrinha da hora atual: 0 = hh:00, quase 1 = hh:59
+  hoursList.children[hour].style.setProperty('--now-frac', String(now.getMinutes() / 60));
+}
+
+/** Virou o dia: o Agora passa a mostrar o plano do novo dia, e o calendário acompanha. */
+function onNewDay(previousKey) {
+  const active = document.activeElement;
+  if (active && active.classList.contains('hour-input')) active.blur();
+  scheduleDay = new Date().getDay();
+  if (selectedKey === previousKey) resetMonthToToday();
+  renderAll();
+}
+
+/** Atualiza já e agenda a próxima atualização para a virada do minuto. */
+let nowTimer = null;
+function scheduleNowUpdates() {
+  clearTimeout(nowTimer);
+  updateNow();
+  nowTimer = setTimeout(scheduleNowUpdates, 60000 - (Date.now() % 60000) + 50);
+}
+
+/** Rola o cronograma até a hora atual. No Mac só a lista rola; o resto da tela fica parado. */
+function scrollToNow(behavior = 'auto') {
+  const row = hoursList.children[new Date().getHours()];
+  if (hoursList.scrollHeight > hoursList.clientHeight + 1) {
+    const offset = row.getBoundingClientRect().top - hoursList.getBoundingClientRect().top;
+    hoursList.scrollTo({ top: hoursList.scrollTop + offset - (hoursList.clientHeight - row.offsetHeight) / 2, behavior });
+  } else {
+    row.scrollIntoView({ block: 'center', behavior });
+  }
+}
+/* --- Visão Semanal: grade com os 7 dias --- */
+const weekGrid = $('#week-grid');
+const weekScroll = $('#week-scroll');
+const DAY_SHORT = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+const DAY_LONG = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+
+/** Monta a grade (24 linhas × 7 colunas). Roda uma vez, ao abrir. */
+function buildWeek() {
+  const head = document.createElement('thead');
+  const headRow = document.createElement('tr');
+  const corner = document.createElement('th');
+  corner.className = 'corner';
+  corner.scope = 'col';
+  const cornerLabel = document.createElement('span');
+  cornerLabel.className = 'sr-only';
+  cornerLabel.textContent = 'Hora';
+  corner.append(cornerLabel);
+  headRow.append(corner);
+  for (let d = 0; d < 7; d++) {
+    const th = document.createElement('th');
+    th.scope = 'col';
+    th.dataset.day = String(d);
+    th.textContent = DAY_SHORT[d];
+    headRow.append(th);
+  }
+  head.append(headRow);
+
+  const body = document.createElement('tbody');
+  for (let h = 0; h < 24; h++) {
+    const tr = document.createElement('tr');
+    tr.dataset.hour = String(h);
+    const th = document.createElement('th');
+    th.scope = 'row';
+    th.textContent = `${pad2(h)}:00`;
+    tr.append(th);
+    for (let d = 0; d < 7; d++) {
+      const td = document.createElement('td');
+      td.dataset.day = String(d);
+      const cell = document.createElement('textarea');
+      cell.className = 'week-cell';
+      cell.id = `w-${d}-${h}`;
+      cell.rows = 2;
+      cell.maxLength = LIMITS.hourText;
+      cell.dataset.day = String(d);
+      cell.dataset.hour = String(h);
+      cell.setAttribute('aria-label', `${DAY_LONG[d]}, ${pad2(h)}:00`);
+      cell.setAttribute('enterkeyhint', 'next');
+      td.append(cell);
+      tr.append(td);
+    }
+    body.append(tr);
+  }
+  weekGrid.append(head, body);
+}
+
+/** Coloca na grade os 7 planos, sem mexer na célula que está sendo digitada. */
+function renderWeek() {
+  for (const cell of weekGrid.querySelectorAll('.week-cell')) {
+    if (cell !== document.activeElement) cell.value = state.week[Number(cell.dataset.day)][Number(cell.dataset.hour)];
+  }
+}
+
+/** Destaca a coluna de hoje e a linha da hora atual. */
+function highlightWeek(now) {
+  const day = now.getDay();
+  const hour = now.getHours();
+  for (const el of weekGrid.querySelectorAll('th[data-day], td[data-day]')) {
+    el.classList.toggle('is-today', Number(el.dataset.day) === day);
+  }
+  for (const tr of weekGrid.tBodies[0].rows) tr.classList.toggle('is-now-row', Number(tr.dataset.hour) === hour);
+}
+
+/** Rola a grade até o dia de hoje e a hora atual. */
+function scrollWeekToNow() {
+  const now = new Date();
+  const cell = $(`#w-${now.getDay()}-${now.getHours()}`);
+  const box = weekScroll.getBoundingClientRect();
+  const r = cell.getBoundingClientRect();
+  weekScroll.scrollTo({
+    left: weekScroll.scrollLeft + r.left - box.left - (box.width - r.width) / 2,
+    top: weekScroll.scrollTop + r.top - box.top - (box.height - r.height) / 2,
+  });
+}
+
+// Cada letra digitada na grade já é salva (quebras de linha viram espaço).
+weekGrid.addEventListener('input', (e) => {
+  const cell = e.target.closest('.week-cell');
+  if (!cell) return;
+  let value = cell.value.replace(/[\r\n]+/g, ' ');
+  if (value.length > LIMITS.hourText) value = value.slice(0, LIMITS.hourText);
+  if (value !== cell.value) cell.value = value;
+  state.week[Number(cell.dataset.day)][Number(cell.dataset.hour)] = value;
+  saveState();
+});
+
+// Ao sair da célula, volta a mostrar o começo do texto (o navegador a deixa rolada até o fim).
+weekGrid.addEventListener('focusout', (e) => {
+  const cell = e.target.closest('.week-cell');
+  if (cell) cell.scrollTop = 0;
+});
+
+// Enter vai para a hora seguinte do mesmo dia.
+weekGrid.addEventListener('keydown', (e) => {
+  const cell = e.target.closest('.week-cell');
+  if (!cell || e.isComposing || e.key !== 'Enter') return;
+  e.preventDefault();
+  const next = $(`#w-${cell.dataset.day}-${Number(cell.dataset.hour) + 1}`);
+  if (next) next.focus();
+  else cell.blur();
+});
+
+/* --- Visão Mensal: calendário com anotações por data --- */
+const monthGrid = $('#month-grid');
+const monthTitleFormat = new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' });
+const noteDateFormat = new Intl.DateTimeFormat('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
+const DOW_INITIALS = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
+let viewYear = 0;
+let viewMonth = 0; // 0 = janeiro
+let selectedKey = '';
+let lastDeletedNote = null; // { key, item, index }: guardado para o "Desfazer"
+
+/** "aaaa-mm-dd" → Date ao meio-dia (evita surpresas de fuso). */
+function parseKey(key) {
+  const [y, m, d] = key.split('-').map(Number);
+  return new Date(y, m - 1, d, 12);
+}
+
+/** Volta o calendário para o mês atual, com hoje selecionado. */
+function resetMonthToToday() {
+  const now = new Date();
+  viewYear = now.getFullYear();
+  viewMonth = now.getMonth();
+  selectedKey = dateKey(now);
+}
+
+/** Anda meses para a frente (+1) ou para trás (−1). Seleciona hoje, se for o mês atual, ou o dia 1. */
+function shiftMonth(delta) {
+  const first = new Date(viewYear, viewMonth + delta, 1);
+  viewYear = first.getFullYear();
+  viewMonth = first.getMonth();
+  const now = new Date();
+  selectedKey = viewYear === now.getFullYear() && viewMonth === now.getMonth() ? dateKey(now) : dateKey(first);
+  renderMonth();
+}
+
+/** Lista de anotações de uma data (sempre uma lista, mesmo vazia). */
+const notesOf = (key) => state.notes[key] || [];
+
+/** Redesenha o calendário do mês e as anotações do dia selecionado. */
+function renderMonth() {
+  const todayKey = dateKey(new Date());
+  $('#month-title').textContent = capitalize(monthTitleFormat.format(new Date(viewYear, viewMonth, 1)));
+  const cells = DOW_INITIALS.map((initial) => {
+    const el = document.createElement('div');
+    el.className = 'month-dow';
+    el.setAttribute('aria-hidden', 'true');
+    el.textContent = initial;
+    return el;
+  });
+  const firstDow = new Date(viewYear, viewMonth, 1).getDay();
+  for (let i = 0; i < firstDow; i++) cells.push(document.createElement('span'));
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+  for (let d = 1; d <= daysInMonth; d++) {
+    const key = `${viewYear}-${pad2(viewMonth + 1)}-${pad2(d)}`;
+    const count = notesOf(key).length;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = key === todayKey ? 'day is-today' : 'day';
+    btn.dataset.date = key;
+    btn.textContent = String(d);
+    btn.setAttribute('aria-pressed', String(key === selectedKey));
+    const extra = (key === todayKey ? ', hoje' : '') + (count ? `, ${count === 1 ? '1 anotação' : `${count} anotações`}` : '');
+    btn.setAttribute('aria-label', noteDateFormat.format(parseKey(key)) + extra);
+    if (count) {
+      const dot = document.createElement('span');
+      dot.className = 'dot';
+      dot.setAttribute('aria-hidden', 'true');
+      btn.append(dot);
+    }
+    cells.push(btn);
+  }
+  monthGrid.replaceChildren(...cells);
+  renderDayNotes();
+}
+
+/** Monta uma anotação. Usa textContent: o texto digitado nunca vira código. */
+function noteItem(n) {
+  const li = document.createElement('li');
+  li.className = 'note';
+  li.dataset.id = n.id;
+  const text = document.createElement('span');
+  text.className = 'note-text';
+  text.textContent = n.text;
+  const del = document.createElement('button');
+  del.type = 'button';
+  del.className = 'btn-icon delete';
+  del.setAttribute('aria-label', `Excluir anotação: ${n.text}`);
+  del.append($('#icon-trash').content.cloneNode(true));
+  li.append(text, del);
+  return li;
+}
+
+/** Anotações do dia selecionado no calendário. */
+function renderDayNotes() {
+  $('#notes-title').textContent = capitalize(noteDateFormat.format(parseKey(selectedKey)));
+  const items = notesOf(selectedKey);
+  $('#note-list').replaceChildren(...items.map(noteItem));
+  $('#notes-empty').hidden = items.length > 0;
+}
+
+/** Quadro "Hoje no calendário" no topo do Agora (só leitura). */
+function renderTodayNotes() {
+  const items = notesOf(dateKey(new Date()));
+  $('#today-notes-list').replaceChildren(...items.map((n) => {
+    const li = document.createElement('li');
+    li.textContent = n.text;
+    return li;
+  }));
+  $('#today-notes').hidden = items.length === 0;
+}
+
+function addNote(text) {
+  const clean = text.trim().slice(0, LIMITS.noteText);
+  if (!clean || !isRealDate(selectedKey)) return false;
+  if (!state.notes[selectedKey]) state.notes[selectedKey] = [];
+  state.notes[selectedKey].push({ id: newId(), text: clean, createdAt: Date.now() });
+  saveState();
+  renderMonth();
+  renderTodayNotes();
+  return true;
+}
+
+function deleteNote(id) {
+  const list = state.notes[selectedKey];
+  if (!list) return;
+  const index = list.findIndex((n) => n.id === id);
+  if (index < 0) return;
+  const [item] = list.splice(index, 1);
+  if (!list.length) delete state.notes[selectedKey];
+  lastDeletedNote = { key: selectedKey, item, index };
+  saveState();
+  renderMonth();
+  renderTodayNotes();
+  showToast('Anotação excluída', { actionLabel: 'Desfazer', onAction: undoDeleteNote, duration: 5000 });
+}
+
+function undoDeleteNote() {
+  if (!lastDeletedNote) return;
+  const { key, item, index } = lastDeletedNote;
+  lastDeletedNote = null;
+  if (!state.notes[key]) state.notes[key] = [];
+  const list = state.notes[key];
+  if (!list.some((n) => n.id === item.id)) list.splice(Math.min(index, list.length), 0, item);
+  saveState();
+  renderMonth();
+  renderTodayNotes();
+}
+
+monthGrid.addEventListener('click', (e) => {
+  const btn = e.target.closest('.day');
+  if (!btn) return;
+  selectedKey = btn.dataset.date;
+  renderMonth();
+});
+$('#month-prev').addEventListener('click', () => shiftMonth(-1));
+$('#month-next').addEventListener('click', () => shiftMonth(1));
+$('#month-today').addEventListener('click', () => { resetMonthToToday(); renderMonth(); });
+$('#note-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const input = $('#note-input');
+  if (addNote(input.value)) input.value = '';
+  input.focus();
+});
+$('#note-list').addEventListener('click', (e) => {
+  const del = e.target.closest('.delete');
+  if (del) deleteNote(del.closest('.note').dataset.id);
+});
+
+/* --- Visões do cronograma: Agora · Semanal · Mensal --- */
+const VIEW_IDS = { today: '#view-today', week: '#view-week', month: '#view-month' };
+let currentView = 'today';
+
+/** Mostra uma visão do cronograma. */
+function showView(name) {
+  currentView = name;
+  document.body.dataset.view = name;
+  for (const btn of document.querySelectorAll('.seg')) btn.setAttribute('aria-pressed', String(btn.dataset.view === name));
+  for (const [view, selector] of Object.entries(VIEW_IDS)) {
+    const el = $(selector);
+    if (el) el.hidden = view !== name;
+  }
+  renderCurrentView();
+}
+
+/** Redesenha a visão aberta e rola até "agora". */
+function renderCurrentView(behavior = 'auto') {
+  if (currentView === 'today') { renderSchedule(); scrollToNow(behavior); }
+  else if (currentView === 'week') { renderWeek(); scrollWeekToNow(); }
+  else if (currentView === 'month') renderMonth();
+}
+
+$('.segmented').addEventListener('click', (e) => {
+  const btn = e.target.closest('.seg');
+  if (!btn) return;
+  // Tocar em "Agora" quando já está nele leva até a hora atual
+  if (btn.dataset.view === currentView) renderCurrentView('smooth');
+  else showView(btn.dataset.view);
+});
+/* =========================================================
+   4. Foco (timer Pomodoro)
+   O tempo restante é sempre calculado pelo relógio (hora de
+   término menos agora). Assim ele continua certo mesmo se o
+   iPhone bloquear, o Safari pausar a página ou você recarregar.
+   ========================================================= */
+const RING_LENGTH = 2 * Math.PI * 54; // comprimento do anel (raio 54 no desenho)
+const STATUS_TEXT = { idle: 'Pronto para focar', running: 'Focando…', paused: 'Pausado', finished: 'Tempo esgotado' };
+const START_LABEL = { idle: 'Iniciar', running: 'Pausar', paused: 'Continuar', finished: 'Iniciar' };
+let focusInterval = null;
+let audioCtx = null;
+
+/** Formata milissegundos como mm:ss, arredondando para cima (mostra 00:01 até o último instante). */
+function formatMs(ms) {
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  return `${pad2(Math.floor(total / 60))}:${pad2(total % 60)}`;
+}
+
+/** Quanto falta, em milissegundos. */
+function focusRemainingMs(now = Date.now()) {
+  const f = state.focus;
+  if (f.status === 'running') return Math.min(Math.max(f.endsAt - now, 0), f.durationMin * 60000);
+  if (f.status === 'finished') return 0;
+  return f.remainingMs;
+}
+
+function startFocus() {
+  unlockAudio(); // precisa acontecer durante o toque, por regra do iPhone
+  const f = state.focus;
+  const ms = f.status === 'paused' ? f.remainingMs : f.durationMin * 60000;
+  state.focus = { ...f, status: 'running', endsAt: Date.now() + ms, remainingMs: ms };
+  saveState();
+  renderFocus();
+}
+
+function pauseFocus() {
+  if (focusRemainingMs() <= 0) { finishFocus(); return; } // pausou no instante em que zerou
+  state.focus = { ...state.focus, status: 'paused', endsAt: null, remainingMs: focusRemainingMs() };
+  saveState();
+  renderFocus();
+}
+
+function resetFocus() {
+  const d = state.focus.durationMin;
+  state.focus = { durationMin: d, status: 'idle', endsAt: null, remainingMs: d * 60000 };
+  saveState();
+  renderFocus();
+}
+
+/** Botões − e +: mudam a duração (só com o timer parado). */
+function changeDuration(delta) {
+  const f = state.focus;
+  if (f.status === 'running' || f.status === 'paused') return;
+  const d = Math.min(LIMITS.maxDuration, Math.max(LIMITS.minDuration, f.durationMin + delta));
+  state.focus = { durationMin: d, status: 'idle', endsAt: null, remainingMs: d * 60000 };
+  saveState();
+  renderFocus();
+}
+
+/** O tempo acabou: grava, mostra o aviso e, se der, toca o som. */
+function finishFocus({ chime = true } = {}) {
+  state.focus = { ...state.focus, status: 'finished', endsAt: null, remainingMs: 0 };
+  saveState();
+  renderFocus();
+  if (chime) playChime();
+  showToast('Tempo de foco esgotado!');
+}
+
+/** Roda 4 vezes por segundo enquanto o timer anda. */
+function focusTick() {
+  if (state.focus.status !== 'running') return;
+  if (focusRemainingMs() <= 0) finishFocus();
+  else renderFocusTime();
+}
+
+/** Atualiza os números, o anel e o título da aba. */
+function renderFocusTime() {
+  const f = state.focus;
+  const ms = focusRemainingMs();
+  const text = formatMs(ms);
+  $('#timer-display').textContent = text;
+  const fraction = f.status === 'finished' ? 1 : ms / (f.durationMin * 60000);
+  $('#ring-progress').style.strokeDashoffset = String(RING_LENGTH * (1 - fraction));
+  const titles = { idle: 'Rotina', running: `${text} · Rotina`, paused: `⏸ ${text} · Rotina`, finished: 'Tempo esgotado · Rotina' };
+  document.title = titles[f.status];
+}
+
+/** Redesenha o timer inteiro e liga ou desliga a conferência do relógio. */
+function renderFocus() {
+  const f = state.focus;
+  const locked = f.status === 'running' || f.status === 'paused';
+  $('#timer-status').textContent = STATUS_TEXT[f.status];
+  $('#btn-start').textContent = START_LABEL[f.status];
+  $('#duration-label').textContent = `${f.durationMin} min`;
+  $('#btn-minus').disabled = locked || f.durationMin <= LIMITS.minDuration;
+  $('#btn-plus').disabled = locked || f.durationMin >= LIMITS.maxDuration;
+  $('#timer').classList.toggle('is-finished', f.status === 'finished');
+  renderFocusTime();
+  if (f.status === 'running' && !focusInterval) focusInterval = setInterval(focusTick, 250);
+  if (f.status !== 'running' && focusInterval) { clearInterval(focusInterval); focusInterval = null; }
+}
+
+/** No iPhone o som só pode ser liberado durante um toque; por isso isto roda no "Iniciar". */
+function unlockAudio() {
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  try {
+    if (!audioCtx) audioCtx = new Ctx();
+    if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+  } catch {
+    audioCtx = null;
+  }
+}
+
+// Se a página recarregou com o timer andando, o "Iniciar" não foi tocado nesta página:
+// o primeiro toque ou tecla em qualquer lugar libera o som para o fim do foco.
+for (const type of ['pointerdown', 'pointerup', 'touchend', 'keydown']) {
+  document.addEventListener(type, () => {
+    if (state.focus.status === 'running') unlockAudio();
+  }, { capture: true, passive: true });
+}
+
+// Alerta: o mesmo som suave, mais alto, tocando 3 vezes (cerca de 4 segundos)
+const CHIME = { repeats: 3, gap: 1.4, volume: 0.6 };
+
+/** Duas notas curtas e suaves, criadas na hora (sem arquivo de áudio), repetidas CHIME.repeats vezes. */
+function playChime() {
+  if (!audioCtx) return;
+  try {
+    // 'interrupted': o iPhone pausou o som (ex.: ligação); tenta retomar
+    if (audioCtx.state === 'suspended' || audioCtx.state === 'interrupted') audioCtx.resume().catch(() => {});
+    const t0 = audioCtx.currentTime + 0.05;
+    for (let rep = 0; rep < CHIME.repeats; rep++) {
+      for (const [freq, delay] of [[880, 0], [1318.5, 0.2]]) {
+        const start = t0 + rep * CHIME.gap + delay;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.0001, start);
+        gain.gain.exponentialRampToValueAtTime(CHIME.volume, start + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + 1.2);
+        osc.connect(gain).connect(audioCtx.destination);
+        osc.start(start);
+        osc.stop(start + 1.3);
+      }
+    }
+  } catch {
+    /* sem som disponível: o aviso visual já aparece */
+  }
+}
+
+$('#btn-start').addEventListener('click', () => (state.focus.status === 'running' ? pauseFocus() : startFocus()));
+$('#btn-reset').addEventListener('click', resetFocus);
+$('#btn-minus').addEventListener('click', () => changeDuration(-LIMITS.step));
+$('#btn-plus').addEventListener('click', () => changeDuration(LIMITS.step));
+/* =========================================================
+   5. Lembretes (lista de tarefas rápidas)
+   ========================================================= */
+const reminderForm = $('#reminder-form');
+const reminderInput = $('#reminder-input');
+const reminderList = $('#reminder-list');
+let lastDeleted = null; // { item, index }: guardado para o "Desfazer"
+
+/** Cria um identificador único para cada lembrete. */
+function newId() {
+  if (window.crypto && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/** Adiciona no topo. Devolve false se o texto estiver vazio. */
+function addReminder(text) {
+  const clean = text.trim().slice(0, LIMITS.reminderText);
+  if (!clean) return false;
+  state.reminders.unshift({ id: newId(), text: clean, done: false, createdAt: Date.now() });
+  saveState();
+  renderReminders();
+  return true;
+}
+
+function toggleReminder(id, done) {
+  const item = state.reminders.find((r) => r.id === id);
+  if (!item) return;
+  item.done = done;
+  saveState();
+  renderReminders();
+  // Mantém o foco do teclado no mesmo item depois de redesenhar a lista
+  const box = reminderList.querySelector(`[data-id="${CSS.escape(id)}"] .check-input`);
+  if (box) box.focus({ preventScroll: true });
+}
+
+function deleteReminder(id) {
+  const index = state.reminders.findIndex((r) => r.id === id);
+  if (index < 0) return;
+  const [item] = state.reminders.splice(index, 1);
+  lastDeleted = { item, index };
+  saveState();
+  renderReminders();
+  showToast('Lembrete excluído', { actionLabel: 'Desfazer', onAction: undoDelete, duration: 5000 });
+}
+
+function undoDelete() {
+  if (!lastDeleted) return;
+  const { item, index } = lastDeleted;
+  lastDeleted = null;
+  if (!state.reminders.some((r) => r.id === item.id)) {
+    state.reminders.splice(Math.min(index, state.reminders.length), 0, item);
+  }
+  saveState();
+  renderReminders();
+}
+
+/** Monta um item da lista. Usa textContent: o texto digitado nunca vira código. */
+function reminderItem(r) {
+  const li = document.createElement('li');
+  li.className = r.done ? 'reminder is-done' : 'reminder';
+  li.dataset.id = r.id;
+
+  const label = document.createElement('label');
+  label.className = 'check';
+  const box = document.createElement('input');
+  box.type = 'checkbox';
+  box.className = 'check-input';
+  box.checked = r.done;
+  const mark = document.createElement('span');
+  mark.className = 'check-box';
+  mark.setAttribute('aria-hidden', 'true');
+  const text = document.createElement('span');
+  text.className = 'reminder-text';
+  text.textContent = r.text;
+  label.append(box, mark, text);
+
+  const del = document.createElement('button');
+  del.type = 'button';
+  del.className = 'btn-icon delete';
+  del.setAttribute('aria-label', `Excluir: ${r.text}`);
+  del.append($('#icon-trash').content.cloneNode(true));
+
+  li.append(label, del);
+  return li;
+}
+
+/** Redesenha a lista: pendentes em cima, concluídos embaixo. */
+function renderReminders() {
+  const pending = state.reminders.filter((r) => !r.done);
+  const done = state.reminders.filter((r) => r.done);
+  reminderList.replaceChildren(...[...pending, ...done].map(reminderItem));
+  $('#pending-count').textContent =
+    pending.length === 0 ? 'Nada pendente' : pending.length === 1 ? '1 pendente' : `${pending.length} pendentes`;
+  $('#reminders-empty').hidden = state.reminders.length > 0;
+}
+
+reminderForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (addReminder(reminderInput.value)) reminderInput.value = '';
+  reminderInput.focus();
+});
+reminderList.addEventListener('change', (e) => {
+  if (!e.target.matches('.check-input')) return;
+  toggleReminder(e.target.closest('.reminder').dataset.id, e.target.checked);
+});
+reminderList.addEventListener('click', (e) => {
+  const del = e.target.closest('.delete');
+  if (del) deleteReminder(del.closest('.reminder').dataset.id);
+});
+
+/* =========================================================
+   6. Navegação e início
+   ========================================================= */
+/** Troca a seção visível no celular (no Mac todas aparecem juntas). */
+function showTab(name) {
+  document.body.dataset.tab = name;
+  for (const tab of document.querySelectorAll('.tab')) {
+    if (tab.dataset.tab === name) tab.setAttribute('aria-current', 'page');
+    else tab.removeAttribute('aria-current');
+  }
+  if (name === 'schedule') renderCurrentView();
+  else window.scrollTo(0, 0);
+}
+$('.tabbar').addEventListener('click', (e) => {
+  const tab = e.target.closest('.tab');
+  if (tab) showTab(tab.dataset.tab);
+});
+
+/** Redesenha todas as seções a partir de `state`. */
+function renderAll() {
+  renderSchedule();
+  renderTodayNotes();
+  renderWeek();
+  renderMonth();
+  renderFocus();
+  renderReminders();
+}
+
+// Outra aba do navegador salvou: carrega a versão nova para não sobrescrevê-la depois.
+window.addEventListener('storage', (e) => {
+  if (e.key !== STORAGE_KEY || e.newValue === null) return;
+  let parsed;
+  try { parsed = JSON.parse(e.newValue); } catch { return; }
+  const wasRunning = state.focus.status === 'running';
+  state = sanitizeState(parsed).state;
+  renderAll();
+  // A outra aba percebeu primeiro que o foco acabou: avisa aqui também, que pode ser a aba que você está olhando.
+  if (wasRunning && state.focus.status === 'finished') {
+    playChime();
+    showToast('Tempo de foco esgotado!');
+  }
+});
+
+// Ao voltar para o app (ex.: desbloqueou o iPhone): atualiza o relógio e confere o timer.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  scheduleNowUpdates();
+  focusTick();
+});
+
+function init() {
+  // Proteção contra moldura (clickjacking): outro site não pode exibir o app dentro dele.
+  if (window.top !== window.self) {
+    const msg = document.createElement('p');
+    msg.className = 'framed';
+    msg.textContent = 'Por segurança, o Rotina só funciona aberto diretamente. Abra o endereço do app numa aba própria.';
+    document.body.replaceChildren(msg);
+    return;
+  }
+  // Ao recarregar, o navegador devolveria a página à posição antiga; quem decide a rolagem é o app (hora atual).
+  if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+  buildSchedule();
+  buildWeek();
+  resetMonthToToday();
+  const { state: loaded, problem, migrated } = loadState();
+  state = loaded;
+  if (problem === 'corrupted') showBanner(MESSAGES.corrupted);
+  if (problem || migrated) saveState(); // grava já no formato novo
+  if (!probeStorage()) { saveFailed = true; showBanner(MESSAGES.saveFailed); }
+  // O tempo de foco acabou com o app fechado: mostra "Tempo esgotado".
+  // Sem som, porque o navegador só deixa tocar depois de um toque na tela.
+  if (state.focus.status === 'running' && focusRemainingMs() <= 0) finishFocus({ chime: false });
+  renderAll();
+  scheduleNowUpdates();
+  showTab('schedule');
+  // Pede ao navegador para não apagar os dados quando faltar espaço (o Safari decide sozinho).
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+  // Cópia para usar sem internet: só na versão publicada (o arquivo local não tem esta etiqueta).
+  const offline = document.querySelector('meta[name="rotina-offline"]');
+  if (offline && 'serviceWorker' in navigator && location.protocol !== 'file:') {
+    navigator.serviceWorker.register(offline.content).catch(() => { /* sem cópia offline: o app funciona normalmente */ });
+  }
+}
+
+init();
+</script>
+</body>
+</html>
